@@ -124,7 +124,7 @@ with tab1:
                     marker=dict(size=14, color=['white', '#FF9900']),
                     text=["Origen", "Destino"],
                     textposition="bottom right",
-                    textfont=dict(color="white"),
+                    textfont=dict(color="black"),
                     name="Ubicaciones"
                 )
                 
@@ -132,7 +132,7 @@ with tab1:
                 fig.update_layout(
                     template="plotly_dark",
                     mapbox=dict(
-                        style="carto-darkmatter",
+                        style="open-street-map",
                         center=dict(lat=df_tiem['Latitud'].iloc[0], lon=df_tiem['Longitud'].iloc[0]),
                         zoom=12
                     ),
@@ -202,7 +202,7 @@ with tab2:
                     marker=dict(size=[16]+[10]*(len(lon_paradas)-1), color=['#00FFCC']+['white']*(len(lon_paradas)-1)),
                     text=["🏠 Almacén"] + [f"📦 P{i}" for i in range(1, len(lon_paradas))],
                     textposition="top right",
-                    textfont=dict(color="white", size=12),
+                    textfont=dict(color="black", size=12),
                     name="Paradas"
                 )
                 
@@ -210,7 +210,7 @@ with tab2:
                 fig2.update_layout(
                     template="plotly_dark",
                     mapbox=dict(
-                        style="carto-darkmatter",
+                        style="open-street-map",
                         center=dict(lat=lat_paradas[0], lon=lon_paradas[0]),
                         zoom=12
                     ),
@@ -272,12 +272,12 @@ with tab3:
                 mode="markers+text",
                 marker=dict(size=16, color="#FF3366"),
                 text=["📍 Almacén"], textposition="bottom right",
-                textfont=dict(color="white", size=14),
+                textfont=dict(color="black", size=14),
                 name="Origen"
             ))
             
             fig3.update_layout(
-                mapbox_style="carto-darkmatter",
+                mapbox_style="open-street-map",
                 mapbox_center=dict(lat=centro_pt.y, lon=centro_pt.x),
                 mapbox_zoom=11,
                 margin={"r":0,"t":0,"l":0,"b":0},
