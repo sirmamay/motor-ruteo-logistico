@@ -55,7 +55,23 @@ def extraer_coordenadas(ruta_nodos, G):
         
         if data and 'geometry' in data and data['geometry']:
             curva = shapely.wkt.loads(data['geometry'])
-            for coord in curva.coords:
+            coords_arista = list(curva.coords)
+            
+            # Obtener coordenadas del nodo de origen (u) para este segmento
+            x_u, y_u = float(G.nodes[u]['x']), float(G.nodes[u]['y'])
+            
+            # Evaluar qué extremo de la geometría está más cerca de nuestro nodo de origen
+            pt_inicial = coords_arista[0]
+            pt_final = coords_arista[-1]
+            
+            dist_al_inicio = (pt_inicial[0] - x_u)**2 + (pt_inicial[1] - y_u)**2
+            dist_al_final = (pt_final[0] - x_u)**2 + (pt_final[1] - y_u)**2
+            
+            # Si el final de la línea dibujada está más cerca de nuestro origen, la invertimos
+            if dist_al_final < dist_al_inicio:
+                coords_arista.reverse()
+                
+            for coord in coords_arista:
                 coords.append(Point(coord[0], coord[1]))
         else:
             coords.append(Point(float(G.nodes[u]['x']), float(G.nodes[u]['y'])))
@@ -63,7 +79,7 @@ def extraer_coordenadas(ruta_nodos, G):
             
     gdf = gpd.GeoDataFrame(geometry=coords, crs="EPSG:32614").to_crs(epsg=4326)
     return pd.DataFrame({'Latitud': gdf.geometry.y, 'Longitud': gdf.geometry.x})
-
+    
 def calcular_metricas(ruta_nodos, G):
     distancia = 0.0
     tiempo = 0.0
