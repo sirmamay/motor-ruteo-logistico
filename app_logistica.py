@@ -79,7 +79,7 @@ def calcular_metricas(ruta_nodos, G):
 tab1, tab2, tab3 = st.tabs(["A vs B (Competitivas)", "Problema del Agente Viajero (Multi-Parada)", "Isócronas (Cobertura por Tiempo)"])
 
 # ==========================================
-# TAB 1: RUTAS COMPETITIVAS (Estilo Oscuro Seguro)
+# TAB 1: RUTAS COMPETITIVAS
 # ==========================================
 with tab1:
     st.subheader("Simulación de Rutas: Distancia vs. Tiempo")
@@ -105,39 +105,38 @@ with tab1:
                     continue
             
             if exito:
-                fig = go.Figure(template="plotly_dark")
-                
-                # Ruta más rápida (Cian)
-                fig.add_trace(go.Scatter(
-                    x=df_tiem['Longitud'], y=df_tiem['Latitud'],
+                trace_tiem = go.Scattermapbox(
+                    lon=df_tiem['Longitud'], lat=df_tiem['Latitud'],
                     mode="lines",
                     line=dict(width=5, color="#00FFCC"),
                     name=f"⚡ Más Rápida ({tiem_2/60:.1f} min | {dist_2/1000:.2f} km)"
-                ))
-                
-                # Ruta más corta (Rosa)
-                fig.add_trace(go.Scatter(
-                    x=df_dist['Longitud'], y=df_dist['Latitud'],
+                )
+                trace_dist = go.Scattermapbox(
+                    lon=df_dist['Longitud'], lat=df_dist['Latitud'],
                     mode="lines",
                     line=dict(width=2, color="#FF3366"),
                     name=f"📏 Más Corta ({tiem_1/60:.1f} min | {dist_1/1000:.2f} km)"
-                ))
-                
-                # Puntos de Origen y Destino
-                fig.add_trace(go.Scatter(
-                    x=[df_tiem['Longitud'].iloc[0], df_tiem['Longitud'].iloc[-1]],
-                    y=[df_tiem['Latitud'].iloc[0], df_tiem['Latitud'].iloc[-1]],
+                )
+                trace_pts = go.Scattermapbox(
+                    lon=[df_tiem['Longitud'].iloc[0], df_tiem['Longitud'].iloc[-1]],
+                    lat=[df_tiem['Latitud'].iloc[0], df_tiem['Latitud'].iloc[-1]],
                     mode="markers+text",
                     marker=dict(size=14, color=['white', '#FF9900']),
                     text=["Origen", "Destino"],
                     textposition="bottom right",
                     textfont=dict(color="white"),
                     name="Ubicaciones"
-                ))
+                )
                 
+                fig = go.Figure(data=[trace_tiem, trace_dist, trace_pts])
                 fig.update_layout(
+                    template="plotly_dark",
+                    mapbox=dict(
+                        style="carto-darkmatter",
+                        center=dict(lat=df_tiem['Latitud'].iloc[0], lon=df_tiem['Longitud'].iloc[0]),
+                        zoom=12
+                    ),
                     margin={"r":0,"t":0,"l":0,"b":0},
-                    xaxis_title="Longitud", yaxis_title="Latitud",
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                     legend=dict(bgcolor="rgba(20,20,20,0.8)", font=dict(color="white"))
                 )
@@ -146,7 +145,7 @@ with tab1:
                 st.error("No se pudo hallar una ruta válida en este bloque. Intenta de nuevo.")
 
 # ==========================================
-# TAB 2: AGENTE VIAJERO (TSP Estilo Oscuro Seguro)
+# TAB 2: AGENTE VIAJERO (TSP)
 # ==========================================
 with tab2:
     st.subheader("Secuenciación Óptima de Reparto")
@@ -191,28 +190,31 @@ with tab2:
                     continue
             
             if exito_tsp:
-                fig2 = go.Figure(template="plotly_dark")
-                
-                fig2.add_trace(go.Scatter(
-                    x=df_tsp['Longitud'], y=df_tsp['Latitud'],
+                trace_tsp = go.Scattermapbox(
+                    lon=df_tsp['Longitud'], lat=df_tsp['Latitud'],
                     mode="lines",
                     line=dict(width=4, color="#b200ff"),
                     name="Ruta TSP"
-                ))
-                
-                fig2.add_trace(go.Scatter(
-                    x=lon_paradas, y=lat_paradas,
+                )
+                trace_paradas = go.Scattermapbox(
+                    lon=lon_paradas, lat=lat_paradas,
                     mode="markers+text",
                     marker=dict(size=[16]+[10]*(len(lon_paradas)-1), color=['#00FFCC']+['white']*(len(lon_paradas)-1)),
                     text=["🏠 Almacén"] + [f"📦 P{i}" for i in range(1, len(lon_paradas))],
                     textposition="top right",
                     textfont=dict(color="white", size=12),
                     name="Paradas"
-                ))
+                )
                 
+                fig2 = go.Figure(data=[trace_tsp, trace_paradas])
                 fig2.update_layout(
+                    template="plotly_dark",
+                    mapbox=dict(
+                        style="carto-darkmatter",
+                        center=dict(lat=lat_paradas[0], lon=lon_paradas[0]),
+                        zoom=12
+                    ),
                     margin={"r":0,"t":0,"l":0,"b":0},
-                    xaxis_title="Longitud", yaxis_title="Latitud",
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                     legend=dict(bgcolor="rgba(20,20,20,0.8)", font=dict(color="white"))
                 )
@@ -248,9 +250,9 @@ with tab3:
             multipunto = MultiPoint(coords_utm)
             poligono_utm = multipunto.convex_hull
             
-            fig3 = px.scatter(
+            fig3 = px.scatter_mapbox(
                 pd.DataFrame({'Latitud': lats_puntos, 'Longitud': lons_puntos}),
-                x="Longitud", y="Latitud", height=550, template="plotly_dark"
+                lat="Latitud", lon="Longitud", height=550, template="plotly_dark"
             )
             fig3.update_traces(marker=dict(size=4, color="#00FFCC", opacity=0.8))
             
@@ -258,15 +260,15 @@ with tab3:
                 poligono_latlon = gpd.GeoSeries([poligono_utm], crs="EPSG:32614").to_crs(epsg=4326).iloc[0]
                 lon_poly, lat_poly = poligono_latlon.exterior.coords.xy
                 
-                fig3.add_trace(go.Scatter(
-                    x=list(lon_poly), y=list(lat_poly),
+                fig3.add_trace(go.Scattermapbox(
+                    lon=list(lon_poly), lat=list(lat_poly),
                     fill="toself", fillcolor="rgba(178, 0, 255, 0.3)",
                     line=dict(color="#b200ff", width=2),
                     name=f"Área Máxima ({minutos_limite} min)"
                 ))
             
-            fig3.add_trace(go.Scatter(
-                x=[centro_pt.x], y=[centro_pt.y],
+            fig3.add_trace(go.Scattermapbox(
+                lon=[centro_pt.x], lat=[centro_pt.y],
                 mode="markers+text",
                 marker=dict(size=16, color="#FF3366"),
                 text=["📍 Almacén"], textposition="bottom right",
@@ -275,8 +277,10 @@ with tab3:
             ))
             
             fig3.update_layout(
+                mapbox_style="carto-darkmatter",
+                mapbox_center=dict(lat=centro_pt.y, lon=centro_pt.x),
+                mapbox_zoom=11,
                 margin={"r":0,"t":0,"l":0,"b":0},
-                xaxis_title="Longitud", yaxis_title="Latitud",
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                 legend=dict(bgcolor="rgba(20,20,20,0.8)", font=dict(color="white"))
             )
