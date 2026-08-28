@@ -13,15 +13,17 @@ st.set_page_config(page_title="Motor Logístico Saltillo", layout="wide")
 st.title("🚚 Suite de Inteligencia Operativa y Ruteo (Última Milla)")
 st.markdown("Plataforma analítica con datos de la Red Nacional de Caminos (INEGI).")
 
-# 2. Motor de Base de Datos Espacial
+# 2. Motor de Base de Datos Espacial y Filtrado de Cruces Válidos
 @st.cache_resource
 def cargar_grafo():
     G_crudo = nx.read_graphml("red_vial_inegi_saltillo.graphml")
     
+    # Filtro Topológico: Extraer solo la red principal conectada
     componentes = list(nx.connected_components(G_crudo))
     componente_principal = max(componentes, key=len)
     G = G_crudo.subgraph(componente_principal).copy()
     
+    # Físicas de Movimiento
     for u, v, data in G.edges(data=True):
         distancia_m = float(data.get('mm_len', 1.0))
         velocidad_str = data.get('VELOCIDAD', '30')
@@ -38,7 +40,10 @@ def cargar_grafo():
 
 try:
     G = cargar_grafo()
-    nodos_lista = list(G.nodes(data=True))
+    # Filtro de Calidad: Seleccionamos solo nodos con grado mayor o igual a 2 (evita callejones muertos)
+    nodos_lista = [n for n, grado in G.degree() if grado >= 2]
+    if not nodos_lista:
+        nodos_lista = list(G.nodes())
 except FileNotFoundError:
     st.error("No se encontró el archivo red_vial_inegi_saltillo.graphml.")
     st.stop()
@@ -83,7 +88,7 @@ with tab1:
     st.subheader("Simulación de Rutas: Distancia vs. Tiempo")
     if st.button("Generar Competitiva", type="primary", key="btn_ab"):
         with st.spinner("Calculando heurísticas..."):
-            origen, destino = random.choice(nodos_lista)[0], random.choice(nodos_lista)[0]
+            origen, destino = random.choice(nodos_lista), random.choice(nodos_lista)
             try:
                 ruta_dist = nx.shortest_path(G, source=origen, target=destino, weight='mm_len')
                 ruta_tiem = nx.shortest_path(G, source=origen, target=destino, weight='tiempo_segundos')
@@ -101,8 +106,8 @@ with tab1:
                 
                 fig.update_layout(mapbox=dict(style="open-street-map", center=dict(lat=df_tiem['Latitud'].iloc[0], lon=df_tiem['Longitud'].iloc[0]), zoom=13), margin={"r":0,"t":0,"l":0,"b":0}, legend=dict(bgcolor="rgba(0,0,0,0.7)", font=dict(color="white")))
                 st.plotly_chart(fig, width='stretch')
-            except:
-                st.warning("Puntos sin conexión encontrados. Intenta de nuevo.")
+            except Exception as e:
+                st.warning(f"No se pudo trazar la ruta en este intento. Vuelve a hacer clic en el botón.")
 
 # ==========================================
 # TAB 2: AGENTE VIAJERO (TSP)
@@ -114,7 +119,7 @@ with tab2:
     
     if st.button("Optimizar Flotilla", type="primary", key="btn_tsp"):
         with st.spinner("Construyendo grafo completo y resolviendo TSP..."):
-            puntos = [random.choice(nodos_lista)[0] for _ in range(num_paradas + 1)]
+            puntos = [random.choice(nodos_lista) for _ in range(num_paradas + 1)]
             
             G_tsp = nx.Graph()
             for i in range(len(puntos)):
@@ -149,8 +154,8 @@ with tab2:
                 fig2.update_layout(mapbox=dict(style="open-street-map", center=dict(lat=lat_paradas[0], lon=lon_paradas[0]), zoom=12.5), margin={"r":0,"t":0,"l":0,"b":0})
                 st.plotly_chart(fig2, width='stretch')
                 st.success(f"Logística resuelta: Se evaluaron matemáticamente las rutas entre {num_paradas} puntos para encontrar la secuencia de menor tiempo de conducción.")
-            except:
-                st.warning("Error topológico aislando un punto. Intenta de nuevo.")
+            except Exception as e:
+                st.warning("No se pudo completar el ciclo TSP en este intento. Vuelve a hacer clic en el botón.")
 
 # ==========================================
 # TAB 3: ISÓCRONAS (COBERTURA ESPACIAL)
@@ -162,7 +167,7 @@ with tab3:
     
     if st.button("Calcular Alcance", type="primary", key="btn_iso"):
         with st.spinner("Construyendo polígono de área de servicio..."):
-            centro = random.choice(nodos_lista)[0]
+            centro = random.choice(nodos_lista)
             segundos_limite = minutos_limite * 60
             
             nodos_alcanzables = nx.single_source_dijkstra_path_length(G, centro, cutoff=segundos_limite, weight='tiempo_segundos')
@@ -179,7 +184,6 @@ with tab3:
             multipunto = MultiPoint(coords_utm)
             poligono_utm = multipunto.convex_hull
             
-            # Usamos Plotly Express estándar (px.line) para mapeo plano seguro sin requerir Scattermapbox
             df_iso_puntos = pd.DataFrame({'Latitud': lats_puntos, 'Longitud': lons_puntos})
             fig3 = px.scatter(df_iso_puntos, x="Longitud", y="Latitud", height=550)
             fig3.update_traces(marker=dict(size=4, color="#00FFCC", opacity=0.7))
