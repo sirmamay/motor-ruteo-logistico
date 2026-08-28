@@ -16,7 +16,15 @@ st.markdown("Plataforma analítica con datos de la Red Nacional de Caminos (INEG
 # 2. Motor de Base de Datos Espacial
 @st.cache_resource
 def cargar_grafo():
-    G = nx.read_graphml("red_vial_inegi_saltillo.graphml")
+    G_crudo = nx.read_graphml("red_vial_inegi_saltillo.graphml")
+    
+    # 1. Filtro Topológico: Extraer solo la red principal conectada
+    # Esto elimina las "islas" cartográficas y garantiza que siempre exista una ruta
+    componentes = list(nx.connected_components(G_crudo))
+    componente_principal = max(componentes, key=len)
+    G = G_crudo.subgraph(componente_principal).copy()
+    
+    # 2. Calculamos el costo en TIEMPO para cada calle
     for u, v, data in G.edges(data=True):
         distancia_m = float(data.get('mm_len', 1.0))
         velocidad_str = data.get('VELOCIDAD', '30')
@@ -28,33 +36,8 @@ def cargar_grafo():
             
         velocidad_ms = velocidad_kmh / 3.6
         data['tiempo_segundos'] = distancia_m / velocidad_ms
-    return G
-
-try:
-    G = cargar_grafo()
-    nodos_lista = list(G.nodes(data=True))
-except FileNotFoundError:
-    st.error("No se encontró el archivo red_vial_inegi_saltillo.graphml.")
-    st.stop()
-
-# Funciones de Soporte Geométrico
-def extraer_coordenadas(ruta_nodos, G):
-    coords = []
-    for i in range(len(ruta_nodos) - 1):
-        u, v = ruta_nodos[i], ruta_nodos[i+1]
-        data = G.get_edge_data(u, v)
-        if data and 0 in data: data = data[0]
         
-        if data and 'geometry' in data and data['geometry']:
-            curva = shapely.wkt.loads(data['geometry'])
-            for coord in curva.coords:
-                coords.append(Point(coord[0], coord[1]))
-        else:
-            coords.append(Point(float(G.nodes[u]['x']), float(G.nodes[u]['y'])))
-            coords.append(Point(float(G.nodes[v]['x']), float(G.nodes[v]['y'])))
-            
-    gdf = gpd.GeoDataFrame(geometry=coords, crs="EPSG:32614").to_crs(epsg=4326)
-    return pd.DataFrame({'Latitud': gdf.geometry.y, 'Longitud': gdf.geometry.x})
+    return G
 
 # 3. Navegación por Pestañas
 tab1, tab2, tab3 = st.tabs(["A vs B (Competitivas)", "Problema del Agente Viajero (Multi-Parada)", "Isócronas (Cobertura por Tiempo)"])
