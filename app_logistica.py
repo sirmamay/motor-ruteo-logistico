@@ -18,12 +18,10 @@ st.markdown("Plataforma analítica con datos de la Red Nacional de Caminos (INEG
 def cargar_grafo():
     G_crudo = nx.read_graphml("red_vial_inegi_saltillo.graphml")
     
-    # Filtro Topológico: Extraer solo la red principal conectada
     componentes = list(nx.connected_components(G_crudo))
     componente_principal = max(componentes, key=len)
     G = G_crudo.subgraph(componente_principal).copy()
     
-    # Físicas de Movimiento
     for u, v, data in G.edges(data=True):
         distancia_m = float(data.get('mm_len', 1.0))
         velocidad_str = data.get('VELOCIDAD', '30')
@@ -40,7 +38,6 @@ def cargar_grafo():
 
 try:
     G = cargar_grafo()
-    # Filtro de Calidad: Seleccionamos solo nodos con grado mayor o igual a 2 (evita callejones muertos)
     nodos_lista = [n for n, grado in G.degree() if grado >= 2]
     if not nodos_lista:
         nodos_lista = list(G.nodes())
@@ -82,23 +79,32 @@ def calcular_metricas(ruta_nodos, G):
 tab1, tab2, tab3 = st.tabs(["A vs B (Competitivas)", "Problema del Agente Viajero (Multi-Parada)", "Isócronas (Cobertura por Tiempo)"])
 
 # ==========================================
-# TAB 1: RUTAS COMPETITIVAS
+# TAB 1: RUTAS COMPETITIVAS (Con Auto-Retry)
 # ==========================================
 with tab1:
     st.subheader("Simulación de Rutas: Distancia vs. Tiempo")
     if st.button("Generar Competitiva", type="primary", key="btn_ab"):
-        with st.spinner("Calculando heurísticas..."):
-            origen, destino = random.choice(nodos_lista), random.choice(nodos_lista)
-            try:
-                ruta_dist = nx.shortest_path(G, source=origen, target=destino, weight='mm_len')
-                ruta_tiem = nx.shortest_path(G, source=origen, target=destino, weight='tiempo_segundos')
-                
-                df_dist = extraer_coordenadas(ruta_dist, G)
-                df_tiem = extraer_coordenadas(ruta_tiem, G)
-                
-                dist_1, tiem_1 = calcular_metricas(ruta_dist, G)
-                dist_2, tiem_2 = calcular_metricas(ruta_tiem, G)
-                
+        with st.spinner("Calculando heurísticas óptimas..."):
+            exito = False
+            intentos = 0
+            while not exito and intentos < 10:
+                intentos += 1
+                origen, destino = random.choice(nodos_lista), random.choice(nodos_lista)
+                if origen == destino: continue
+                try:
+                    ruta_dist = nx.shortest_path(G, source=origen, target=destino, weight='mm_len')
+                    ruta_tiem = nx.shortest_path(G, source=origen, target=destino, weight='tiempo_segundos')
+                    
+                    df_dist = extraer_coordenadas(ruta_dist, G)
+                    df_tiem = extraer_coordenadas(ruta_tiem, G)
+                    
+                    dist_1, tiem_1 = calcular_metricas(ruta_dist, G)
+                    dist_2, tiem_2 = calcular_metricas(ruta_tiem, G)
+                    exito = True
+                except:
+                    continue
+            
+            if exito:
                 fig = go.Figure()
                 fig.add_trace(go.Scattermapbox(mode="lines", lon=df_tiem['Longitud'], lat=df_tiem['Latitud'], line=dict(width=6, color="#00FFCC"), name=f"⚡ Más Rápida ({tiem_2/60:.1f} min | {dist_2/1000:.2f} km)"))
                 fig.add_trace(go.Scattermapbox(mode="lines", lon=df_dist['Longitud'], lat=df_dist['Latitud'], line=dict(width=3, color="#FF3366"), name=f"📏 Más Corta ({tiem_1/60:.1f} min | {dist_1/1000:.2f} km)"))
@@ -106,11 +112,11 @@ with tab1:
                 
                 fig.update_layout(mapbox=dict(style="open-street-map", center=dict(lat=df_tiem['Latitud'].iloc[0], lon=df_tiem['Longitud'].iloc[0]), zoom=13), margin={"r":0,"t":0,"l":0,"b":0}, legend=dict(bgcolor="rgba(0,0,0,0.7)", font=dict(color="white")))
                 st.plotly_chart(fig, width='stretch')
-            except Exception as e:
-                st.warning(f"No se pudo trazar la ruta en este intento. Vuelve a hacer clic en el botón.")
+            else:
+                st.error("No se pudo hallar una ruta válida en este bloque. Intenta de nuevo.")
 
 # ==========================================
-# TAB 2: AGENTE VIAJERO (TSP)
+# TAB 2: AGENTE VIAJERO (TSP con Auto-Retry)
 # ==========================================
 with tab2:
     st.subheader("Secuenciación Óptima de Reparto")
@@ -118,47 +124,54 @@ with tab2:
     num_paradas = st.slider("Número de Entregas (Nodos)", 3, 8, 5)
     
     if st.button("Optimizar Flotilla", type="primary", key="btn_tsp"):
-        with st.spinner("Construyendo grafo completo y resolviendo TSP..."):
-            puntos = [random.choice(nodos_lista) for _ in range(num_paradas + 1)]
-            
-            G_tsp = nx.Graph()
-            for i in range(len(puntos)):
-                for j in range(i+1, len(puntos)):
-                    try:
-                        tiempo = nx.shortest_path_length(G, puntos[i], puntos[j], weight='tiempo_segundos')
-                        G_tsp.add_edge(puntos[i], puntos[j], weight=tiempo)
-                    except:
-                        pass
-            
-            try:
-                secuencia_optima = nx.approximation.traveling_salesman_problem(G_tsp, weight='weight', cycle=True)
-                
-                ruta_fisica = []
-                for i in range(len(secuencia_optima)-1):
-                    tramo = nx.shortest_path(G, secuencia_optima[i], secuencia_optima[i+1], weight='tiempo_segundos')
-                    if i > 0: tramo = tramo[1:]
-                    ruta_fisica.extend(tramo)
+        with st.spinner("Resolviendo optimización combinatoria TSP..."):
+            exito_tsp = False
+            intentos_tsp = 0
+            while not exito_tsp and intentos_tsp < 5:
+                intentos_tsp += 1
+                try:
+                    puntos = [random.choice(nodos_lista) for _ in range(num_paradas + 1)]
+                    G_tsp = nx.Graph()
+                    for i in range(len(puntos)):
+                        for j in range(i+1, len(puntos)):
+                            try:
+                                tiempo = nx.shortest_path_length(G, puntos[i], puntos[j], weight='tiempo_segundos')
+                                G_tsp.add_edge(puntos[i], puntos[j], weight=tiempo)
+                            except:
+                                pass
                     
-                df_tsp = extraer_coordenadas(ruta_fisica, G)
-                
-                lat_paradas, lon_paradas = [], []
-                for p in secuencia_optima[:-1]:
-                    x, y = float(G.nodes[p]['x']), float(G.nodes[p]['y'])
-                    pt = gpd.GeoSeries([Point(x, y)], crs="EPSG:32614").to_crs(epsg=4326).iloc[0]
-                    lat_paradas.append(pt.y)
-                    lon_paradas.append(pt.x)
-                
+                    secuencia_optima = nx.approximation.traveling_salesman_problem(G_tsp, weight='weight', cycle=True)
+                    
+                    ruta_fisica = []
+                    for i in range(len(secuencia_optima)-1):
+                        tramo = nx.shortest_path(G, secuencia_optima[i], secuencia_optima[i+1], weight='tiempo_segundos')
+                        if i > 0: tramo = tramo[1:]
+                        ruta_fisica.extend(tramo)
+                        
+                    df_tsp = extraer_coordenadas(ruta_fisica, G)
+                    
+                    lat_paradas, lon_paradas = [], []
+                    for p in secuencia_optima[:-1]:
+                        x, y = float(G.nodes[p]['x']), float(G.nodes[p]['y'])
+                        pt = gpd.GeoSeries([Point(x, y)], crs="EPSG:32614").to_crs(epsg=4326).iloc[0]
+                        lat_paradas.append(pt.y)
+                        lon_paradas.append(pt.x)
+                    exito_tsp = True
+                except:
+                    continue
+            
+            if exito_tsp:
                 fig2 = go.Figure()
                 fig2.add_trace(go.Scattermapbox(mode="lines", lon=df_tsp['Longitud'], lat=df_tsp['Latitud'], line=dict(width=4, color="#b200ff"), name="Ruta TSP"))
                 fig2.add_trace(go.Scattermapbox(mode="markers+text", lon=lon_paradas, lat=lat_paradas, marker=dict(size=[16]+[10]*(len(lon_paradas)-1), color=['#00FFCC']+['white']*(len(lon_paradas)-1)), text=["🏠 Almacén"] + [f"📦 P{i}" for i in range(1, len(lon_paradas))], textposition="top right", textfont=dict(color="black", size=12), name="Paradas"))
                 fig2.update_layout(mapbox=dict(style="open-street-map", center=dict(lat=lat_paradas[0], lon=lon_paradas[0]), zoom=12.5), margin={"r":0,"t":0,"l":0,"b":0})
                 st.plotly_chart(fig2, width='stretch')
                 st.success(f"Logística resuelta: Se evaluaron matemáticamente las rutas entre {num_paradas} puntos para encontrar la secuencia de menor tiempo de conducción.")
-            except Exception as e:
-                st.warning("No se pudo completar el ciclo TSP en este intento. Vuelve a hacer clic en el botón.")
+            else:
+                st.error("No se pudo completar el ciclo TSP. Intenta ajustar el número de entregas.")
 
 # ==========================================
-# TAB 3: ISÓCRONAS (COBERTURA ESPACIAL)
+# TAB 3: ISÓCRONAS (Estilo Ejecutivo Oscuro)
 # ==========================================
 with tab3:
     st.subheader("Análisis de Cobertura Geográfica (Isócronas)")
@@ -185,8 +198,8 @@ with tab3:
             poligono_utm = multipunto.convex_hull
             
             df_iso_puntos = pd.DataFrame({'Latitud': lats_puntos, 'Longitud': lons_puntos})
-            fig3 = px.scatter(df_iso_puntos, x="Longitud", y="Latitud", height=550)
-            fig3.update_traces(marker=dict(size=4, color="#00FFCC", opacity=0.7))
+            fig3 = px.scatter(df_iso_puntos, x="Longitud", y="Latitud", height=550, template="plotly_dark")
+            fig3.update_traces(marker=dict(size=4, color="#00FFCC", opacity=0.8))
             
             if len(coords_utm) >= 3 and poligono_utm.geom_type == 'Polygon':
                 poligono_latlon = gpd.GeoSeries([poligono_utm], crs="EPSG:32614").to_crs(epsg=4326).iloc[0]
@@ -194,7 +207,7 @@ with tab3:
                 
                 fig3.add_trace(go.Scatter(
                     x=list(lon_poly), y=list(lat_poly),
-                    fill="toself", fillcolor="rgba(178, 0, 255, 0.2)",
+                    fill="toself", fillcolor="rgba(178, 0, 255, 0.3)",
                     line=dict(color="#b200ff", width=2),
                     name=f"Área Máxima ({minutos_limite} min)"
                 ))
@@ -204,14 +217,15 @@ with tab3:
                 mode="markers+text",
                 marker=dict(size=16, color="#FF3366"),
                 text=["📍 Almacén"], textposition="bottom right",
-                textfont=dict(color="black", size=14),
+                textfont=dict(color="white", size=14),
                 name="Origen"
             ))
             
             fig3.update_layout(
                 margin={"r":0,"t":0,"l":0,"b":0},
                 xaxis_title="Longitud", yaxis_title="Latitud",
-                legend=dict(bgcolor="rgba(255,255,255,0.8)", font=dict(color="black"))
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                legend=dict(bgcolor="rgba(20,20,20,0.8)", font=dict(color="white"))
             )
             
             st.plotly_chart(fig3, width='stretch')
