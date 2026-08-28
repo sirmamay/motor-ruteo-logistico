@@ -181,12 +181,16 @@ with tab3:
             multipunto = MultiPoint(coords_utm)
             poligono_utm = multipunto.convex_hull
             
-            fig3 = go.Figure()
+            # Usamos Plotly Express para evitar problemas de compatibilidad de mapas
+            df_iso_puntos = pd.DataFrame({'Latitud': lats_puntos, 'Longitud': lons_puntos})
+            fig3 = px.scatter_mapbox(df_iso_puntos, lat="Latitud", lon="Longitud", zoom=12.5, height=550)
+            fig3.update_traces(marker=dict(size=5, color="#00FFCC", opacity=0.7))
             
             if len(coords_utm) >= 3 and poligono_utm.geom_type == 'Polygon':
                 poligono_latlon = gpd.GeoSeries([poligono_utm], crs="EPSG:32614").to_crs(epsg=4326).iloc[0]
                 lon_poly, lat_poly = poligono_latlon.exterior.coords.xy
                 
+                # Agregamos la traza del polígono usando líneas de Scattermapbox de forma segura
                 fig3.add_trace(go.Scattermapbox(
                     mode="lines",
                     lon=list(lon_poly), lat=list(lat_poly),
@@ -195,13 +199,7 @@ with tab3:
                     name=f"Área Máxima ({minutos_limite} min)"
                 ))
             
-            fig3.add_trace(go.Scattermapbox(
-                mode="markers",
-                lon=lons_puntos, lat=lats_puntos,
-                marker=dict(size=5, color="#00FFCC", opacity=0.7),
-                name="Calles Transitadas"
-            ))
-            
+            # Marcador del almacén origen
             fig3.add_trace(go.Scattermapbox(
                 mode="markers+text",
                 lon=[centro_pt.x], lat=[centro_pt.y],
@@ -214,7 +212,6 @@ with tab3:
             fig3.update_layout(
                 mapbox_style="open-street-map", 
                 margin={"r":0,"t":0,"l":0,"b":0},
-                mapbox=dict(center=dict(lat=centro_pt.y, lon=centro_pt.x), zoom=12.5),
                 legend=dict(bgcolor="rgba(255,255,255,0.7)", font=dict(color="black"))
             )
             
