@@ -18,12 +18,10 @@ st.markdown("Plataforma analítica con datos de la Red Nacional de Caminos (INEG
 def cargar_grafo():
     G_crudo = nx.read_graphml("red_vial_inegi_saltillo.graphml")
     
-    # Filtro Topológico: Extraer solo la red principal conectada (elimina islas cartográficas)
     componentes = list(nx.connected_components(G_crudo))
     componente_principal = max(componentes, key=len)
     G = G_crudo.subgraph(componente_principal).copy()
     
-    # Calculamos el costo en TIEMPO para cada calle de Saltillo
     for u, v, data in G.edges(data=True):
         distancia_m = float(data.get('mm_len', 1.0))
         velocidad_str = data.get('VELOCIDAD', '30')
@@ -40,7 +38,7 @@ def cargar_grafo():
 
 try:
     G = cargar_grafo()
-    nodos_lista = list(G.nodes(data=True)) # Alimentación segura de nodos conectados
+    nodos_lista = list(G.nodes(data=True))
 except FileNotFoundError:
     st.error("No se encontró el archivo red_vial_inegi_saltillo.graphml.")
     st.stop()
@@ -181,38 +179,35 @@ with tab3:
             multipunto = MultiPoint(coords_utm)
             poligono_utm = multipunto.convex_hull
             
-            # Usamos Plotly Express para evitar problemas de compatibilidad de mapas
+            # Usamos Plotly Express estándar (px.line) para mapeo plano seguro sin requerir Scattermapbox
             df_iso_puntos = pd.DataFrame({'Latitud': lats_puntos, 'Longitud': lons_puntos})
-            fig3 = px.scatter_mapbox(df_iso_puntos, lat="Latitud", lon="Longitud", zoom=12.5, height=550)
-            fig3.update_traces(marker=dict(size=5, color="#00FFCC", opacity=0.7))
+            fig3 = px.scatter(df_iso_puntos, x="Longitud", y="Latitud", height=550)
+            fig3.update_traces(marker=dict(size=4, color="#00FFCC", opacity=0.7))
             
             if len(coords_utm) >= 3 and poligono_utm.geom_type == 'Polygon':
                 poligono_latlon = gpd.GeoSeries([poligono_utm], crs="EPSG:32614").to_crs(epsg=4326).iloc[0]
                 lon_poly, lat_poly = poligono_latlon.exterior.coords.xy
                 
-                # Agregamos la traza del polígono usando líneas de Scattermapbox de forma segura
-                fig3.add_trace(go.Scattermapbox(
-                    mode="lines",
-                    lon=list(lon_poly), lat=list(lat_poly),
+                fig3.add_trace(go.Scatter(
+                    x=list(lon_poly), y=list(lat_poly),
                     fill="toself", fillcolor="rgba(178, 0, 255, 0.2)",
                     line=dict(color="#b200ff", width=2),
                     name=f"Área Máxima ({minutos_limite} min)"
                 ))
             
-            # Marcador del almacén origen
-            fig3.add_trace(go.Scattermapbox(
+            fig3.add_trace(go.Scatter(
+                x=[centro_pt.x], y=[centro_pt.y],
                 mode="markers+text",
-                lon=[centro_pt.x], lat=[centro_pt.y],
-                marker=dict(size=18, color="#FF3366"),
+                marker=dict(size=16, color="#FF3366"),
                 text=["📍 Almacén"], textposition="bottom right",
-                textfont=dict(color="black", size=15),
+                textfont=dict(color="black", size=14),
                 name="Origen"
             ))
             
             fig3.update_layout(
-                mapbox_style="open-street-map", 
                 margin={"r":0,"t":0,"l":0,"b":0},
-                legend=dict(bgcolor="rgba(255,255,255,0.7)", font=dict(color="black"))
+                xaxis_title="Longitud", yaxis_title="Latitud",
+                legend=dict(bgcolor="rgba(255,255,255,0.8)", font=dict(color="black"))
             )
             
             st.plotly_chart(fig3, width='stretch')
