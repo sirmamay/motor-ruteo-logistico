@@ -5,8 +5,8 @@ import geopandas as gpd
 from shapely.geometry import Point, MultiPoint
 import shapely.wkt
 import plotly.graph_objects as go
-import random
 import plotly.express as px
+import random
 
 # 1. Configuración de Interfaz
 st.set_page_config(page_title="Motor Logístico Saltillo", layout="wide")
@@ -18,13 +18,12 @@ st.markdown("Plataforma analítica con datos de la Red Nacional de Caminos (INEG
 def cargar_grafo():
     G_crudo = nx.read_graphml("red_vial_inegi_saltillo.graphml")
     
-    # 1. Filtro Topológico: Extraer solo la red principal conectada
-    # Esto elimina las "islas" cartográficas y garantiza que siempre exista una ruta
+    # Filtro Topológico: Extraer solo la red principal conectada (elimina islas cartográficas)
     componentes = list(nx.connected_components(G_crudo))
     componente_principal = max(componentes, key=len)
     G = G_crudo.subgraph(componente_principal).copy()
     
-    # 2. Calculamos el costo en TIEMPO para cada calle
+    # Calculamos el costo en TIEMPO para cada calle de Saltillo
     for u, v, data in G.edges(data=True):
         distancia_m = float(data.get('mm_len', 1.0))
         velocidad_str = data.get('VELOCIDAD', '30')
@@ -38,6 +37,43 @@ def cargar_grafo():
         data['tiempo_segundos'] = distancia_m / velocidad_ms
         
     return G
+
+try:
+    G = cargar_grafo()
+    nodos_lista = list(G.nodes(data=True)) # Alimentación segura de nodos conectados
+except FileNotFoundError:
+    st.error("No se encontró el archivo red_vial_inegi_saltillo.graphml.")
+    st.stop()
+
+# Funciones de Soporte Geométrico
+def extraer_coordenadas(ruta_nodos, G):
+    coords = []
+    for i in range(len(ruta_nodos) - 1):
+        u, v = ruta_nodos[i], ruta_nodos[i+1]
+        data = G.get_edge_data(u, v)
+        if data and 0 in data: data = data[0]
+        
+        if data and 'geometry' in data and data['geometry']:
+            curva = shapely.wkt.loads(data['geometry'])
+            for coord in curva.coords:
+                coords.append(Point(coord[0], coord[1]))
+        else:
+            coords.append(Point(float(G.nodes[u]['x']), float(G.nodes[u]['y'])))
+            coords.append(Point(float(G.nodes[v]['x']), float(G.nodes[v]['y'])))
+            
+    gdf = gpd.GeoDataFrame(geometry=coords, crs="EPSG:32614").to_crs(epsg=4326)
+    return pd.DataFrame({'Latitud': gdf.geometry.y, 'Longitud': gdf.geometry.x})
+
+def calcular_metricas(ruta_nodos, G):
+    distancia = 0.0
+    tiempo = 0.0
+    for i in range(len(ruta_nodos) - 1):
+        u, v = ruta_nodos[i], ruta_nodos[i+1]
+        data = G.get_edge_data(u, v)
+        if data and 0 in data: data = data[0]
+        distancia += float(data.get('mm_len', 0))
+        tiempo += float(data.get('tiempo_segundos', 0))
+    return distancia, tiempo
 
 # 3. Navegación por Pestañas
 tab1, tab2, tab3 = st.tabs(["A vs B (Competitivas)", "Problema del Agente Viajero (Multi-Parada)", "Isócronas (Cobertura por Tiempo)"])
@@ -57,10 +93,13 @@ with tab1:
                 df_dist = extraer_coordenadas(ruta_dist, G)
                 df_tiem = extraer_coordenadas(ruta_tiem, G)
                 
+                dist_1, tiem_1 = calcular_metricas(ruta_dist, G)
+                dist_2, tiem_2 = calcular_metricas(ruta_tiem, G)
+                
                 fig = go.Figure()
-                fig.add_trace(go.Scattermapbox(mode="lines", lon=df_tiem['Longitud'], lat=df_tiem['Latitud'], line=dict(width=6, color="#00FFCC"), name="Ruta más Rápida"))
-                fig.add_trace(go.Scattermapbox(mode="lines", lon=df_dist['Longitud'], lat=df_dist['Latitud'], line=dict(width=3, color="#FF3366"), name="Ruta más Corta"))
-                fig.add_trace(go.Scattermapbox(mode="markers+text", lon=[df_tiem['Longitud'].iloc[0], df_tiem['Longitud'].iloc[-1]], lat=[df_tiem['Latitud'].iloc[0], df_tiem['Latitud'].iloc[-1]], marker=dict(size=14, color=['white', '#FF9900']), text=["Origen", "Destino"], textposition="bottom right", textfont=dict(color="white"), name="Puntos"))
+                fig.add_trace(go.Scattermapbox(mode="lines", lon=df_tiem['Longitud'], lat=df_tiem['Latitud'], line=dict(width=6, color="#00FFCC"), name=f"⚡ Más Rápida ({tiem_2/60:.1f} min | {dist_2/1000:.2f} km)"))
+                fig.add_trace(go.Scattermapbox(mode="lines", lon=df_dist['Longitud'], lat=df_dist['Latitud'], line=dict(width=3, color="#FF3366"), name=f"📏 Más Corta ({tiem_1/60:.1f} min | {dist_1/1000:.2f} km)"))
+                fig.add_trace(go.Scattermapbox(mode="markers+text", lon=[df_tiem['Longitud'].iloc[0], df_tiem['Longitud'].iloc[-1]], lat=[df_tiem['Latitud'].iloc[0], df_tiem['Latitud'].iloc[-1]], marker=dict(size=14, color=['white', '#FF9900']), text=["Origen", "Destino"], textposition="bottom right", textfont=dict(color="white"), name="Ubicaciones"))
                 
                 fig.update_layout(mapbox=dict(style="open-street-map", center=dict(lat=df_tiem['Latitud'].iloc[0], lon=df_tiem['Longitud'].iloc[0]), zoom=13), margin={"r":0,"t":0,"l":0,"b":0}, legend=dict(bgcolor="rgba(0,0,0,0.7)", font=dict(color="white")))
                 st.plotly_chart(fig, width='stretch')
@@ -77,9 +116,8 @@ with tab2:
     
     if st.button("Optimizar Flotilla", type="primary", key="btn_tsp"):
         with st.spinner("Construyendo grafo completo y resolviendo TSP..."):
-            puntos = [random.choice(nodos_lista)[0] for _ in range(num_paradas + 1)] # Almacén + N paradas
+            puntos = [random.choice(nodos_lista)[0] for _ in range(num_paradas + 1)]
             
-            # Construimos un sub-grafo completo con las distancias reales entre todas las paradas
             G_tsp = nx.Graph()
             for i in range(len(puntos)):
                 for j in range(i+1, len(puntos)):
@@ -90,19 +128,16 @@ with tab2:
                         pass
             
             try:
-                # Algoritmo de aproximación TSP
                 secuencia_optima = nx.approximation.traveling_salesman_problem(G_tsp, weight='weight', cycle=True)
                 
-                # Desenrollamos la secuencia en una ruta física
                 ruta_fisica = []
                 for i in range(len(secuencia_optima)-1):
                     tramo = nx.shortest_path(G, secuencia_optima[i], secuencia_optima[i+1], weight='tiempo_segundos')
-                    if i > 0: tramo = tramo[1:] # Evitar duplicar nodos al conectar tramos
+                    if i > 0: tramo = tramo[1:]
                     ruta_fisica.extend(tramo)
                     
                 df_tsp = extraer_coordenadas(ruta_fisica, G)
                 
-                # Coordenadas exactas de las paradas
                 lat_paradas, lon_paradas = [], []
                 for p in secuencia_optima[:-1]:
                     x, y = float(G.nodes[p]['x']), float(G.nodes[p]['y'])
@@ -132,27 +167,22 @@ with tab3:
             centro = random.choice(nodos_lista)[0]
             segundos_limite = minutos_limite * 60
             
-            # Dijkstra para encontrar todos los nodos alcanzables
             nodos_alcanzables = nx.single_source_dijkstra_path_length(G, centro, cutoff=segundos_limite, weight='tiempo_segundos')
             
             coords_utm = []
             for n in nodos_alcanzables.keys():
                 coords_utm.append(Point(float(G.nodes[n]['x']), float(G.nodes[n]['y'])))
                 
-            # Proyectamos los puntos internos para dibujarlos sutilmente
             gdf_puntos = gpd.GeoSeries(coords_utm, crs="EPSG:32614").to_crs(epsg=4326)
             lats_puntos, lons_puntos = gdf_puntos.y, gdf_puntos.x
             
-            # Punto central exacto
             centro_pt = gpd.GeoSeries([Point(float(G.nodes[centro]['x']), float(G.nodes[centro]['y']))], crs="EPSG:32614").to_crs(epsg=4326).iloc[0]
             
-            # 1. Ingeniería Geométrica: Envolvente Convexa (Convex Hull)
             multipunto = MultiPoint(coords_utm)
             poligono_utm = multipunto.convex_hull
             
             fig3 = go.Figure()
             
-            # Capa 1: El Polígono de Cobertura (Solo si hay suficientes puntos para formar un área)
             if len(coords_utm) >= 3 and poligono_utm.geom_type == 'Polygon':
                 poligono_latlon = gpd.GeoSeries([poligono_utm], crs="EPSG:32614").to_crs(epsg=4326).iloc[0]
                 lon_poly, lat_poly = poligono_latlon.exterior.coords.xy
@@ -160,20 +190,18 @@ with tab3:
                 fig3.add_trace(go.Scattermapbox(
                     mode="lines",
                     lon=list(lon_poly), lat=list(lat_poly),
-                    fill="toself", fillcolor="rgba(178, 0, 255, 0.2)", # Morado translúcido
+                    fill="toself", fillcolor="rgba(178, 0, 255, 0.2)",
                     line=dict(color="#b200ff", width=2),
                     name=f"Área Máxima ({minutos_limite} min)"
                 ))
             
-            # Capa 2: Puntos de la red vial (Calles reales alcanzadas)
             fig3.add_trace(go.Scattermapbox(
                 mode="markers",
                 lon=lons_puntos, lat=lats_puntos,
-                marker=dict(size=5, color="#00FFCC", opacity=0.7), # Cian neón
+                marker=dict(size=5, color="#00FFCC", opacity=0.7),
                 name="Calles Transitadas"
             ))
             
-            # Capa 3: Marcador del Almacén (Centro de origen)
             fig3.add_trace(go.Scattermapbox(
                 mode="markers+text",
                 lon=[centro_pt.x], lat=[centro_pt.y],
@@ -183,7 +211,6 @@ with tab3:
                 name="Origen"
             ))
             
-            # Configuración final del mapa
             fig3.update_layout(
                 mapbox_style="open-street-map", 
                 margin={"r":0,"t":0,"l":0,"b":0},
